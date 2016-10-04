@@ -223,6 +223,9 @@ int tcp;
 /// Local Port.
 char* lport;
 
+/// Local Host
+char *lhost;
+
 /// Remote Host.
 char* rhost;
 /// Remote Port.
@@ -246,7 +249,7 @@ volatile int stop=0;
 /// @param why the error message.
 void short_usage_hints(const char* why) {
   if (why) ERR("Error: %s\n\n",why);
-  ERR("Usage: netsed [option] proto lport rhost rport rule1 [ rule2 ... ]\n\n");
+  ERR("Usage: netsed [option] proto lport lhost rhost rport rule1 [ rule2 ... ]\n\n");
   ERR("  use netsed -h for more information on usage.\n");
   exit(1);
 }
@@ -256,7 +259,7 @@ void short_usage_hints(const char* why) {
 /// @param why the error message.
 void usage_hints(const char* why) {
   if (why) ERR("Error: %s\n\n",why);
-  ERR("Usage: netsed [option] proto lport rhost rport rule1 [ rule2 ... ]\n\n");
+  ERR("Usage: netsed [option] proto lhost lport rhost rport rule1 [ rule2 ... ]\n\n");
 #ifdef PARSE_LONG_OPT
   ERR("  options - can be --ipv4 or -4 to force address resolution in IPv4,\n");
   ERR("            --ipv6 or -6 to force address resolution in IPv6,\n");
@@ -268,6 +271,7 @@ void usage_hints(const char* why) {
   ERR("          - -h to display this usage information.\n");
 #endif
   ERR("  proto   - protocol specification (tcp or udp)\n");
+  ERR("  lhost   - local address to bind to\n");  
   ERR("  lport   - local port to listen on (see README for transparent\n");
   ERR("            traffic intercepting on some systems)\n");
   ERR("  rhost   - where connection should be forwarded (0 = use destination\n");
@@ -494,15 +498,18 @@ void parse_params(int argc,char* argv[]) {
   }
 
   // parse remaining positional parameters
-  if (argc<optind+5) short_usage_hints("not enough parameters");
+  if (argc<optind+6) short_usage_hints("not enough parameters");
 
-  // protocole
+  // protocol
   if (strcasecmp(argv[optind],"tcp")*strcasecmp(argv[optind],"udp")) short_usage_hints("incorrect protocol");
   tcp = strncasecmp(argv[optind++], "udp", 3);
 
+  // local host
+  lhost = argv[optind++];  
+  
   // local port
   lport = argv[optind++];
-
+  
   // remote host & port
   rhost = argv[optind++];
   rport = argv[optind++];
@@ -547,7 +554,7 @@ void parse_params(int argc,char* argv[]) {
 /// @param tcp     1 tcp, 0 udp.
 /// @param portstr string representing the port to bind
 ///                (will be resolved using getaddrinfo()).
-void bind_and_listen(int af, int tcp, const char *portstr) {
+void bind_and_listen(int af, int tcp, char *local_addr, const char *portstr) {
   int ret;
   struct addrinfo hints, *res, *reslist;
 
@@ -556,10 +563,18 @@ void bind_and_listen(int af, int tcp, const char *portstr) {
   hints.ai_flags = AI_PASSIVE;
   hints.ai_socktype = tcp ? SOCK_STREAM : SOCK_DGRAM;
 
+  /*
   if ((ret = getaddrinfo(NULL, portstr, &hints, &reslist))) {
     ERR("getaddrinfo(): %s\n", gai_strerror(ret));
     error("Impossible to resolve listening port.");
   }
+  */
+  
+  if ((ret = getaddrinfo(local_addr, portstr, &hints, &reslist))) {
+    ERR("getaddrinfo(): %s\n", gai_strerror(ret));
+    error("Impossible to resolve listening port.");
+  }  
+  
   /* We have useful addresses. */
   for (res = reslist; res; res = res->ai_next) {
     int one = 1;
@@ -574,7 +589,7 @@ void bind_and_listen(int af, int tcp, const char *portstr) {
       if (setsockopt(lsock, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof(one)))
         printf("    Failed to unset IPV6_V6ONLY: %s.\n", strerror(errno));
     if (bind(lsock, res->ai_addr, res->ai_addrlen) < 0) {
-      ERR("bind(): %s", strerror(errno));
+      ERR("bind(): %s\n", strerror(errno));
       close(lsock);
       continue;
     }
@@ -754,7 +769,7 @@ int main(int argc,char* argv[]) {
     error("Failed in resolving remote host.");
 
   if (fixedhost.ss_family && fixedport)
-    printf("[+] Using fixed forwarding to %s,%s.\n",rhost,rport);
+    printf("[+] Using fixed forwarding to %s:%s.\n",rhost,rport);
   else if (fixedport)
     printf("[+] Using dynamic (transparent proxy) forwarding with fixed port %s.\n",rport);
   else if (fixedhost.ss_family)
@@ -762,7 +777,9 @@ int main(int argc,char* argv[]) {
   else
     printf("[+] Using dynamic (transparent proxy) forwarding.\n");
 
-  bind_and_listen(fixedhost.ss_family, tcp, lport);
+  //bind_and_listen(fixedhost.ss_family, tcp, lport);
+  printf("[+] Binding to %s:%s.\n", lhost, lport);
+  bind_and_listen(fixedhost.ss_family, tcp, lhost, lport);
 
   printf("[+] Listening on port %s/%s.\n", lport, (tcp)?"tcp":"udp");
 
