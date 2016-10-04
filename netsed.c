@@ -249,7 +249,7 @@ volatile int stop=0;
 /// @param why the error message.
 void short_usage_hints(const char* why) {
   if (why) ERR("Error: %s\n\n",why);
-  ERR("Usage: netsed [option] proto lport lhost rhost rport rule1 [ rule2 ... ]\n\n");
+  ERR("Usage: netsed [option] proto lhost lport rhost rport rule1 [ rule2 ... ]\n\n");
   ERR("  use netsed -h for more information on usage.\n");
   exit(1);
 }
@@ -562,18 +562,11 @@ void bind_and_listen(int af, int tcp, char *local_addr, const char *portstr) {
   hints.ai_family = af;
   hints.ai_flags = AI_PASSIVE;
   hints.ai_socktype = tcp ? SOCK_STREAM : SOCK_DGRAM;
-
-  /*
-  if ((ret = getaddrinfo(NULL, portstr, &hints, &reslist))) {
-    ERR("getaddrinfo(): %s\n", gai_strerror(ret));
-    error("Impossible to resolve listening port.");
-  }
-  */
   
   if ((ret = getaddrinfo(local_addr, portstr, &hints, &reslist))) {
     ERR("getaddrinfo(): %s\n", gai_strerror(ret));
     error("Impossible to resolve listening port.");
-  }  
+  }
   
   /* We have useful addresses. */
   for (res = reslist; res; res = res->ai_next) {
@@ -885,7 +878,7 @@ int main(int argc,char* argv[]) {
         int one=1;
         getnameinfo((struct sockaddr *) &s, l, ipstr, sizeof(ipstr),
                     portstr, sizeof(portstr), NI_NUMERICHOST | NI_NUMERICSERV);
-        printf("[+] Got incoming connection from %s,%s", ipstr, portstr);
+        printf("[+] Got incoming connection from %s:%s", ipstr, portstr);
         conn = malloc(sizeof(struct tracker_s));
         if(NULL == conn) error("netsed: unable to malloc() connection tracker struct");
         // protocol specific init
@@ -918,7 +911,7 @@ int main(int argc,char* argv[]) {
 #endif
         getnameinfo((struct sockaddr *) &s, l, ipstr, sizeof(ipstr),
                     portstr, sizeof(portstr), NI_NUMERICHOST | NI_NUMERICSERV);
-        printf(" to %s,%s\n", ipstr, portstr);
+        printf(" to %s:%s\n", ipstr, portstr);
         conpo = get_port((struct sockaddr *) &s);
 
         memcpy(&conho, &s, sizeof(conho));
@@ -932,11 +925,31 @@ int main(int argc,char* argv[]) {
         set_port((struct sockaddr *) &s, conpo);
         getnameinfo((struct sockaddr *) &s, l, ipstr, sizeof(ipstr),
                     portstr, sizeof(portstr), NI_NUMERICHOST | NI_NUMERICSERV);
-        printf("[*] Forwarding connection to %s,%s\n", ipstr, portstr);
+        printf("[*] Forwarding connection to %s:%s\n", ipstr, portstr);
 
         // connect will bind with some dynamic addr/port
         conn->fsock = socket(s.ss_family, tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
 
+        // bind() before connect()
+        
+        struct addrinfo *wherefrom;
+        
+        if ((ret = getaddrinfo(lhost, "31337", NULL, &wherefrom))) {
+          freetracker(conn);
+          conn = NULL;
+          error("Impossible to resolve connecting port / local addr!");
+        } else {
+          if (bind(conn->fsock, wherefrom->ai_addr, wherefrom->ai_addrlen) < 0) {
+            freetracker(conn);
+            conn = NULL;
+            error("Impossible to bind() to local addr!");
+          } else {
+            printf("[+] Binding to local addr sucessfull!\n");
+          }
+        }
+
+        // bind() end
+        
         if (connect(conn->fsock,(struct sockaddr*)&s,l)) {
            printf("[!] Cannot connect to remote server, dropping connection.\n");
            freetracker(conn);
